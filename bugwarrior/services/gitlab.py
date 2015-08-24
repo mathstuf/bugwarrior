@@ -22,6 +22,7 @@ class GitlabIssue(Issue):
     STATE = 'gitlabstate'
     UPVOTES = 'gitlabupvotes'
     DOWNVOTES = 'gitlabdownvotes'
+    WORK_IN_PROGRESS = 'gitlabwip'
 
     UDAS = {
         TITLE: {
@@ -72,6 +73,10 @@ class GitlabIssue(Issue):
             'type': 'numeric',
             'label': 'Gitlab Downvotes',
         },
+        WORK_IN_PROGRESS: {
+            'type': 'numeric',
+            'label': 'Gitlab MR Work-In-Progress Flag',
+        },
     }
     UNIQUE_KEY = (REPO, TYPE, NUMBER,)
 
@@ -87,6 +92,7 @@ class GitlabIssue(Issue):
             state = self.record['state']
             upvotes = self.record['upvotes']
             downvotes = self.record['downvotes']
+            work_in_progress = self.record.get('work_in_progress', 0)
         else:
             priority = self.origin['default_priority']
             milestone = self.record['milestone']
@@ -95,6 +101,7 @@ class GitlabIssue(Issue):
             state = self.record['state']
             upvotes = 0
             downvotes = 0
+            work_in_progress = 0
 
         if milestone:
             milestone = milestone['title']
@@ -121,6 +128,7 @@ class GitlabIssue(Issue):
             self.STATE: state,
             self.UPVOTES: upvotes,
             self.DOWNVOTES: downvotes,
+            self.WORK_IN_PROGRESS: work_in_progress,
         }
 
     def get_tags(self):
@@ -255,9 +263,21 @@ class GitlabService(IssueService):
         }
 
         full = []
+        detect_broken_gitlab_pagination = []
         while True:
             items = self._fetch(tmpl, params=params)
+
+            # XXX: Some gitlab versions have a bug where pagination doesn't
+            # work and instead return the entire result no matter what. Detect
+            # this by seeing if the results are the same as the last time
+            # around and bail if so. Unfortunately, while it is a GitLab bug,
+            # we have to deal with instances where it exists.
+            if items == detect_broken_gitlab_pagination:
+                break
+            detect_broken_gitlab_pagination = items
+
             full += items
+
             if len(items) < params['per_page']:
                 break
             params['page'] += 1
